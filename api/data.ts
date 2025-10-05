@@ -1,5 +1,4 @@
 import { kv } from '@vercel/kv';
-import { NextApiRequest, NextApiResponse } from 'next';
 
 // --- TYPES for API context ---
 interface User {
@@ -100,7 +99,7 @@ const addResponse = async (username: string, newResponse: { answers: Record<stri
 };
 
 // --- API Handler ---
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req, res) {
     try {
         if (req.method === 'GET') {
             const usernameFromHeader = req.headers['x-username'] as string;
