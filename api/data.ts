@@ -1,5 +1,9 @@
 import { kv } from '@vercel/kv';
 
+export const config = {
+    runtime: 'edge',
+};
+
 // --- TYPES for API context ---
 interface User {
     username: string;
@@ -98,74 +102,71 @@ const addResponse = async (username: string, newResponse: { answers: Record<stri
     await saveData(username, data);
 };
 
-// --- API Handler ---
-export default async function handler(req, res) {
+// --- API Handler (Edge Runtime Compatible) ---
+export default async function handler(request: Request): Promise<Response> {
     try {
-        if (req.method === 'GET') {
-            const usernameFromHeader = req.headers['x-username'] as string;
-            const surveyIdFromQuery = req.query.id as string;
+        const { method, headers } = request;
+        const { searchParams } = new URL(request.url);
+        const jsonResponse = (data: any, status: number) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+
+        if (method === 'GET') {
+            const usernameFromHeader = headers.get('x-username');
+            const surveyIdFromQuery = searchParams.get('id');
 
             if (usernameFromHeader) { // Authenticated request for creator's dashboard
                 const data = await getData(usernameFromHeader);
-                return res.status(200).json(data);
-
-            } else if (surveyIdFromQuery) { // Public request for a survey
+                return jsonResponse(data, 200);
+            }
+            
+            if (surveyIdFromQuery) { // Public request for a survey
                 const data = await getData(surveyIdFromQuery);
                 if (data && data.survey) {
-                    // Only return public-safe data
-                    const publicData = {
-                        survey: data.survey,
-                        isSurveyOpen: data.isSurveyOpen,
-                    };
-                    return res.status(200).json(publicData);
-                } else {
-                    return res.status(404).json({ error: 'لم يتم العثور على الاستبيان.' });
+                    const publicData = { survey: data.survey, isSurveyOpen: data.isSurveyOpen };
+                    return jsonResponse(publicData, 200);
                 }
-            } else {
-                return res.status(400).json({ error: 'Username header or survey ID is required' });
+                return jsonResponse({ error: 'لم يتم العثور على الاستبيان.' }, 404);
             }
+            
+            return jsonResponse({ error: 'Username header or survey ID is required' }, 400);
         }
 
-        if (req.method === 'POST') {
-            const { action, payload } = req.body;
+        if (method === 'POST') {
+            const { action, payload } = await request.json();
             
             switch (action) {
                 case 'saveUser':
                     const success = await saveUser(payload);
-                    if (!success) {
-                        return res.status(409).json({ error: 'اسم المستخدم هذا موجود بالفعل.' });
-                    }
-                    return res.status(201).json({ success: true });
+                    if (!success) return jsonResponse({ error: 'اسم المستخدم هذا موجود بالفعل.' }, 409);
+                    return jsonResponse({ success: true }, 201);
 
                 case 'authenticateUser':
                     const authenticated = await authenticateUser(payload.username, payload.password_raw);
-                    if (!authenticated) {
-                         return res.status(401).json({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة.' });
-                    }
-                    return res.status(200).json({ success: true });
+                    if (!authenticated) return jsonResponse({ error: 'اسم المستخدم أو كلمة المرور غير صحيحة.' }, 401);
+                    return jsonResponse({ success: true }, 200);
                 
                 case 'saveData': {
-                     const username = req.headers['x-username'] as string;
-                     if (!username) return res.status(400).json({ error: 'Username header is required' });
+                     const username = headers.get('x-username');
+                     if (!username) return jsonResponse({ error: 'Username header is required' }, 400);
                      await saveData(username, payload);
-                     return res.status(200).json({ success: true });
+                     return jsonResponse({ success: true }, 200);
                 }
+
                 case 'addResponse': {
                      const { ownerUsername, answers } = payload;
-                     if (!ownerUsername || !answers) return res.status(400).json({ error: 'Invalid response payload' });
+                     if (!ownerUsername || !answers) return jsonResponse({ error: 'Invalid response payload' }, 400);
                      await addResponse(ownerUsername, { answers });
-                     return res.status(200).json({ success: true });
+                     return jsonResponse({ success: true }, 200);
                 }
+
                 default:
-                    return res.status(400).json({ error: 'Invalid action' });
+                    return jsonResponse({ error: 'Invalid action' }, 400);
             }
         }
 
-        res.setHeader('Allow', ['GET', 'POST']);
-        return res.status(405).end(`Method ${req.method} Not Allowed`);
+        return new Response(`Method ${method} Not Allowed`, { status: 405, headers: { 'Allow': 'GET, POST' } });
 
     } catch (error: any) {
         console.error('API Error:', error);
-        return res.status(500).json({ error: error.message || 'Internal Server Error' });
+        return new Response(JSON.stringify({ error: error.message || 'Internal Server Error' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
     }
 }
