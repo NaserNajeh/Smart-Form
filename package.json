@@ -3,9 +3,6 @@
   "name": "survey-builder-app",
   "version": "1.0.0",
   "private": true,
-  "scripts": {
-    "build": "echo 'No build step required'"
-  },
   "dependencies": {
     "@google/genai": "^1.22.0",
     "@vercel/kv": "^3.0.0",
