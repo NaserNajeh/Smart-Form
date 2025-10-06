@@ -1,0 +1,20 @@
+{
+  "functions": {
+    "api/data.ts": {
+      "runtime": "edge"
+    }
+  },
+  "routes": [
+    {
+      "src": "/api/data",
+      "dest": "/api/data"
+    },
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/.*",
+      "dest": "/index.html"
+    }
+  ]
+}
