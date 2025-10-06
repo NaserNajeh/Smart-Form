@@ -16,6 +16,6 @@
     "esbuild": "^0.20.2"
   },
   "scripts": {
-    "build": "esbuild index.tsx --bundle --outfile=dist/index.js --jsx=automatic"
+    "build": "esbuild index.tsx --bundle --outfile=public/index.js --jsx=automatic"
   }
 }
