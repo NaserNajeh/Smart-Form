@@ -1,9 +1,4 @@
 {
-  "functions": {
-    "api/data.ts": {
-      "runtime": "edge"
-    }
-  },
   "routes": [
     {
       "src": "/api/data",
