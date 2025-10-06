@@ -1,4 +1,5 @@
 import { kv } from '@vercel/kv';
+import { GoogleGenAI, Type } from "@google/genai";
 
 export const config = {
     runtime: 'edge',
@@ -33,6 +34,55 @@ interface StoredData {
     responses: SurveyResponse[];
     isSurveyOpen: boolean;
 }
+
+// --- GEMINI API HELPERS (moved to backend) ---
+const surveySchema = {
+    type: Type.OBJECT,
+    properties: {
+        title: { type: Type.STRING, description: "عنوان الاستبيان" },
+        questions: {
+            type: Type.ARRAY,
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    id: { type: Type.NUMBER },
+                    text: { type: Type.STRING, description: "نص السؤال" },
+                    type: { type: Type.STRING, enum: ['single-choice', 'multiple-choice', 'likert-5', 'text'] },
+                    options: { type: Type.ARRAY, items: { type: Type.STRING } }
+                },
+                required: ['id', 'text', 'type']
+            }
+        }
+    },
+    required: ['title', 'questions']
+};
+
+const createSurveyFromText_API = async (text: string): Promise<Survey> => {
+    if (!process.env.API_KEY) {
+        throw new Error("API_KEY environment variable is not set.");
+    }
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const prompt = `أنت خبير في بناء استبيانات الأبحاث. قام المستخدم بتزويد النص التالي الذي يحتوي على أسئلة استبيان. مهمتك هي تحليل هذا النص وتحويله إلى تنسيق JSON منظم. القواعد: 1. حدد العنوان الرئيسي للاستبيان إن وجد. 2. لكل سؤال، حدد نوع السؤال الأنسب. الأنواع المدعومة هي: "single-choice", "multiple-choice", "likert-5", "text". 3. بالنسبة لنوع "likert-5"، يجب أن تكون الخيارات بالضبط: "لا أوافق بشدة", "لا أوافق", "محايد", "أوافق", "أوافق بشدة". 4. بالنسبة لأنواع "single-choice" و "multiple-choice"، استخرج الخيارات من النص. 5. بالنسبة لنوع "text"، هو سؤال مفتوح، لذا يجب أن تكون مصفوفة "options" فارغة. 6. التزم بصرامة بمخطط JSON المطلوب. النص هو: \`\`\`${text}\`\`\` قم بالرد فقط بكائن JSON.`;
+
+    const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash", contents: prompt,
+        config: { responseMimeType: "application/json", responseSchema: surveySchema },
+    });
+
+    const jsonString = response.text.trim();
+    try {
+        const parsedJson = JSON.parse(jsonString);
+        parsedJson.questions.forEach((q: SurveyQuestion, index: number) => {
+            if (!q.id) q.id = index + 1; // Ensure ID exists
+            if (q.type === 'likert-5') q.options = ["لا أوافق بشدة", "لا أوافق", "محايد", "أوافق", "أوافق بشدة"];
+        });
+        return parsedJson;
+    } catch (e) {
+        console.error("Failed to parse JSON from AI:", e, jsonString);
+        throw new Error("فشل الذكاء الاصطناعي في تكوين الاستبيان بشكل صحيح.");
+    }
+};
+
 
 // --- Database Keys ---
 const DB_USERS_KEY = `survey_app_users`;
@@ -156,6 +206,18 @@ export default async function handler(request: Request): Promise<Response> {
                      if (!ownerUsername || !answers) return jsonResponse({ error: 'Invalid response payload' }, 400);
                      await addResponse(ownerUsername, { answers });
                      return jsonResponse({ success: true }, 200);
+                }
+
+                case 'createSurvey': {
+                     const { text } = payload;
+                     if (!text) return jsonResponse({ error: 'Text content is required' }, 400);
+                     try {
+                         const newSurvey = await createSurveyFromText_API(text);
+                         return jsonResponse(newSurvey, 200);
+                     } catch (error: any) {
+                         console.error("Error in createSurvey action:", error);
+                         return jsonResponse({ error: error.message }, 500);
+                     }
                 }
 
                 default:

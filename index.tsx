@@ -1,6 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
-import { GoogleGenAI, Type } from "@google/genai";
 
 // --- TYPES ---
 interface SurveyQuestion {
@@ -679,53 +678,11 @@ const apiClient = {
     // Respondent Data Management
     getPublicSurvey: (surveyId: string) => apiClient._request(`data?id=${surveyId}`, 'GET'),
     addResponse: (ownerUsername: string, answers: Record<string, string | string[]>) => apiClient._request('data', 'POST', { action: 'addResponse', payload: { ownerUsername, answers } }),
+    
+    // AI Survey Creation
+    createSurvey: (text: string): Promise<Survey> => apiClient._request('data', 'POST', { action: 'createSurvey', payload: { text } }),
 };
 
-
-// --- GEMINI API HELPERS ---
-const surveySchema = {
-    type: Type.OBJECT,
-    properties: {
-        title: { type: Type.STRING, description: "عنوان الاستبيان" },
-        questions: {
-            type: Type.ARRAY,
-            items: {
-                type: Type.OBJECT,
-                properties: {
-                    id: { type: Type.NUMBER },
-                    text: { type: Type.STRING, description: "نص السؤال" },
-                    type: { type: Type.STRING, enum: ['single-choice', 'multiple-choice', 'likert-5', 'text'] },
-                    options: { type: Type.ARRAY, items: { type: Type.STRING } }
-                },
-                required: ['id', 'text', 'type']
-            }
-        }
-    },
-    required: ['title', 'questions']
-};
-
-const createSurveyFromText = async (text: string): Promise<Survey> => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const prompt = `أنت خبير في بناء استبيانات الأبحاث. قام المستخدم بتزويد النص التالي الذي يحتوي على أسئلة استبيان. مهمتك هي تحليل هذا النص وتحويله إلى تنسيق JSON منظم. القواعد: 1. حدد العنوان الرئيسي للاستبيان إن وجد. 2. لكل سؤال، حدد نوع السؤال الأنسب. الأنواع المدعومة هي: "single-choice", "multiple-choice", "likert-5", "text". 3. بالنسبة لنوع "likert-5"، يجب أن تكون الخيارات بالضبط: "لا أوافق بشدة", "لا أوافق", "محايد", "أوافق", "أوافق بشدة". 4. بالنسبة لأنواع "single-choice" و "multiple-choice"، استخرج الخيارات من النص. 5. بالنسبة لنوع "text"، هو سؤال مفتوح، لذا يجب أن تكون مصفوفة "options" فارغة. 6. التزم بصرامة بمخطط JSON المطلوب. النص هو: \`\`\`${text}\`\`\` قم بالرد فقط بكائن JSON.`;
-
-    const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash", contents: prompt,
-        config: { responseMimeType: "application/json", responseSchema: surveySchema },
-    });
-
-    const jsonString = response.text.trim();
-    try {
-        const parsedJson = JSON.parse(jsonString);
-        parsedJson.questions.forEach((q: SurveyQuestion, index: number) => {
-            if (!q.id) q.id = index + 1; // Ensure ID exists
-            if (q.type === 'likert-5') q.options = ["لا أوافق بشدة", "لا أوافق", "محايد", "أوافق", "أوافق بشدة"];
-        });
-        return parsedJson;
-    } catch (e) {
-        console.error("Failed to parse JSON:", e, jsonString);
-        throw new Error("فشل الذكاء الاصطناعي في تكوين الاستبيان بشكل صحيح.");
-    }
-};
 
 // --- COMPONENTS ---
 const RespondentView: React.FC<{
@@ -966,7 +923,7 @@ const SurveyCreator: React.FC<{ currentUser: User }> = ({ currentUser }) => {
         const reader = new FileReader();
         reader.onload = async (e) => {
             try {
-                const newSurvey = await createSurveyFromText(e.target?.result as string);
+                const newSurvey = await apiClient.createSurvey(e.target?.result as string);
                 await saveData({ survey: newSurvey, responses: [], isSurveyOpen: true });
                 setFile(null); // Clear file input after success
             } catch (err: any) {
